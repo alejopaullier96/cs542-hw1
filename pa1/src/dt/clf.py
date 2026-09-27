@@ -192,7 +192,7 @@ class InteriorNode(Node):
         X_col = X[:, feature_idx] # take the feature column
         best_quality = -np.inf # initialize with the worst possible case
         best_threshold = None # no initial threshold
-        for threshold in self._get_continuous_feature_thresholds(X_col): 
+        for threshold in self._get_continuous_feature_thresholds(X_col, y_gt): 
             left_gts = y_gt[X_col <= threshold] # ground truth values for the left side
             right_gts = y_gt[X_col > threshold] # ground truth values for the right side
             quality = float(self.quality_function.quality(y_gt, [left_gts, right_gts])) # quality of the split

@@ -342,10 +342,10 @@ class DecisionTreeClassifier(Model):
         #           pre_prune_function(X, y_gt, available_feature_idxs, depth)
         from collections import deque
         pending = deque() # queue
-        pending.append((X, y_gt, set(available_feature_idxs), depth, None)) # add the root node to the queue
+        pending.append((X, y_gt, set(available_feature_idxs), depth, None))# we start with a queue with all the data
         root = None # at first the root is none
         self.num_nodes = 0
-        while pending:
+        while pending: 
             X_node, y_node, feature_idxs, depth_node, parent = pending.popleft() # get the next node from the queue
             prune = pre_prune_function is not None and pre_prune_function(X_node, y_node, feature_idxs, depth_node)
             pure = len(np.unique(y_node)) <= 1 # all the labels in the leaf are one class

@@ -150,16 +150,89 @@ class InteriorNode(Node):
         #       don't forget that you need to consider two cases:
         #           - the feature is DISCRETE (eval this feature by considering the sole split)
         #           - the feature is CONTINUOUS (eval this feature by choosing the best "version" of this feature)
+        if feature_type == FeatureType.DISCRETE:
+            feature_quality, feature_split_values = self._eval_discrete_feature(X, y_gt, feature_idx)
+        elif feature_type == FeatureType.CONTINUOUS:
+            feature_quality, feature_split_values = self._eval_continuous_feature(X, y_gt, feature_idx)
 
         return feature_quality, feature_split_values
 
-    def _get_continuous_feature_thresholds(self: InteriorNode,
-                                           X_col: np.ndarray,
-                                           y_gt: np.ndarray) -> Sequence[float]:
+    def _eval_discrete_feature(
+            self: InteriorNode,
+            X: np.ndarray,
+            y_gt: np.ndarray,
+            feature_idx: int
+        ) -> tuple[float, Sequence[float]]:
+        """
+        Evaluate the quality of a discrete feature.
+        :param X: one column example: np.array([1, 2, 2, 4, 3, 2, 1, 1, 3, 4])
+        :param y_gt: one target example: np.array([0, 0, 1, 1, 0, 0, 0, 1, 1, 1])
+        """
+        X_col = X[:, feature_idx] # take the feature column
+        feature_split_values = list(np.unique(X_col))# get unique values of the feature column 
+        child_gts = [] # ground truth values for each unique value of the feature column
+        for value in feature_split_values:
+            child_gts.append(y_gt[X_col == value])
+        feature_quality = float(self.quality_function.quality(y_gt, child_gts))
+        return feature_quality, feature_split_values
+
+    def _eval_continuous_feature(
+        self: InteriorNode,
+        X: np.ndarray,
+        y_gt: np.ndarray,
+        feature_idx: int) -> tuple[float, Sequence[float]]:
+        """
+        Evaluate the quality of a continuous feature.
+        :param X: one column example: np.array([1.1, 2.3, 3.2, 4.8, 5.7])
+        :param y_gt: one target example: np.array([0, 0, 1, 1, 0])
+        """
+        X_col = X[:, feature_idx] # take the feature column
+        best_quality = -np.inf # initialize with the worst possible case
+        best_threshold = None # no initial threshold
+        for threshold in self._get_continuous_feature_thresholds(X_col): 
+            left_gts = y_gt[X_col <= threshold] # ground truth values for the left side
+            right_gts = y_gt[X_col > threshold] # ground truth values for the right side
+            quality = float(self.quality_function.quality(y_gt, [left_gts, right_gts])) # quality of the split
+            if quality > best_quality:
+                best_quality = quality # save the best quality
+                best_threshold = threshold# save the best threshold
+        return best_quality, [best_threshold]
+    
+    def _get_continuous_feature_thresholds(
+        self: InteriorNode,
+        X_col: np.ndarray,
+        y_gt: np.ndarray
+    ) -> Sequence[float]:
+        """
+        Get the potential thresholds for a continuous feature.
+        :param X_col: one column example: np.array([1.0, 2.0, 2.0, 3.0])
+        :param y_gt: one target example: np.array([0, 0, 1, 1])
+        """
         thresholds: Sequence[float] = list()
 
         # TODO: calculate the potential thresholds this continuous feature
         #       could choose! Remember the algorithm from lecture!
+        order = np.argsort(X_col) # sort the feature column, this returns the indices
+        sorted_X_col = X_col[order] # sort the feature column
+        sorted_y_gt = y_gt[order] # sort the target column according to the feature column
+        
+        # Using the example, unique_vals = [1.0, 2.0, 3.0] and start_idxs = [0, 1, 3]
+        unique_vals, start_idxs = np.unique(sorted_X_col, return_index=True) # get unique values and their indices
+        label_groups = np.split(sorted_y_gt, start_idxs[1:]) # split the target column into groups
+        label_sets = []
+        for group in label_groups:
+            label_set = set(np.unique(group).tolist())
+            label_sets.append(label_set)# [{0}, {0, 1}, {1}] for example
+
+        for i in range(len(unique_vals) - 1): # iterate over the unique values
+            left_labels = label_sets[i]
+            right_labels = label_sets[i + 1]
+            c1 = left_labels != right_labels # the class changes if the neighbors have different labels
+            c2 = len(left_labels) > 1 #the left labels have more than one class
+            c3 = len(right_labels) > 1 #the right labels have more than one class
+            if c1 or c2 or c3:
+                val = (unique_vals[i] + unique_vals[i + 1]) / 2.0 # average two consecutive values
+                thresholds.append(float(val))
 
         return thresholds
 

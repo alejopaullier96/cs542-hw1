@@ -340,8 +340,31 @@ class DecisionTreeClassifier(Model):
         #
         #       you should expect this to be called like this:
         #           pre_prune_function(X, y_gt, available_feature_idxs, depth)
+        from collections import deque
+        pending = deque() # queue
+        pending.append((X, y_gt, set(available_feature_idxs), depth, None)) # add the root node to the queue
+        root = None # at first the root is none
+        self.num_nodes = 0
+        while pending:
+            X_node, y_node, feature_idxs, depth_node, parent = pending.popleft() # get the next node from the queue
+            prune = pre_prune_function is not None and pre_prune_function(X_node, y_node, feature_idxs, depth_node)
+            pure = len(np.unique(y_node)) <= 1 # all the labels in the leaf are one class
+            no_features = len(feature_idxs) == 0 # no features left
+            if prune or pure or no_features:
+                node: Node = LeafNode(self.header, self.quality_function, X_node, y_node) 
+            else:
+                node = InteriorNode(self.header, self.quality_function, X_node, y_node, feature_idxs)
+                for X_child, y_child in node.get_child_datasets():# add child nodes to the queue
+                    new_depth = depth_node + 1 
+                    pending.append((X_child, y_child, set(node.child_feature_idxs), new_depth, node))
 
-        return node
+            self.num_nodes += 1 
+            if parent is None:
+                root = node
+            else:
+                parent.children.append(node)
+
+        return root
 
     def fit(self: DecisionTreeClassifier,
             X: np.ndarray,

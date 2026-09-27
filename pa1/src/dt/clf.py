@@ -95,6 +95,9 @@ class InteriorNode(Node):
                  available_feature_idxs: Set[int]) -> None:
         super().__init__(header, quality_function, X, y_gt)
 
+        self.X = X
+        self.y_gt = y_gt
+
         # these will be set by self._pick_best_feature
         self.feature_quality: float = None
         self.feature_idx: int = None
@@ -244,19 +247,31 @@ class InteriorNode(Node):
 
         return child
 
-    def get_child_datasets(self: InteriorNode,
-                           X: np.ndarray,
-                           y_gt: np.ndarray) -> Sequence[tuple[np.ndarray, np.ndarray]]:
+    def get_child_datasets(self: InteriorNode) -> Sequence[tuple[np.ndarray, np.ndarray]]:
         child_datasets: Sequence[tuple[np.ndarray, np.ndarray]] = list()
 
         # get the column of data that this interior node focuses on
-        X_col: np.ndarray = X[:, self.feature_idx]
-        feature_type = self.header[feature_idx].type
+        X_col: np.ndarray = self.X[:, self.feature_idx]
+        feature_type = self.header[self.feature_idx].type
 
         # TODO: split (self.X, self.y_gt) according to this node.
         #       don't forget that you need to consider two cases:
         #           - the feature is DISCRETE: generate one dataset per feature value
         #           - the feature is CONTINUOUS: make a binary split
+        if feature_type == FeatureType.DISCRETE: # discrete column
+            for value in self.feature_split_values: # iterate over the feature split values
+                X_child = self.X[X_col == value] # get the child dataset for the feature value
+                y_child = self.y_gt[X_col == value] # get the child ground truth for the feature value
+                child_datasets.append((X_child, y_child))
+        elif feature_type == FeatureType.CONTINUOUS: # continuous column
+            for threshold in self.feature_split_values:
+                X_child_left = self.X[X_col <= threshold] # get the child dataset for the left side
+                y_child_left = self.y_gt[X_col <= threshold] # get the child ground truth for the left side
+                child_datasets.append((X_child_left, y_child_left))
+
+                X_child_right = self.X[X_col > threshold] # get the child dataset for the right side
+                y_child_right = self.y_gt[X_col > threshold] # get the child ground truth for the right side
+                child_datasets.append((X_child_right, y_child_right))
 
         return child_datasets
 

@@ -219,7 +219,7 @@ class InteriorNode(Node):
         sorted_X_col = X_col[order] # sort the feature column
         sorted_y_gt = y_gt[order] # sort the target column according to the feature column
         
-        # Using the example, unique_vals = [1.0, 2.0, 3.0] and start_idxs = [0, 1, 3]
+        # Example, unique_vals = [1.0, 2.0, 3.0] and start_idxs = [0, 1, 3]
         unique_vals, start_idxs = np.unique(sorted_X_col, return_index=True) # get unique values and their indices
         label_groups = np.split(sorted_y_gt, start_idxs[1:]) # split the target column into groups
         label_sets = []
@@ -241,11 +241,26 @@ class InteriorNode(Node):
 
     def predict(self: InteriorNode,
                 x: np.ndarray) -> Union[int, Node]:
+
+        """
+        Predict the class of a sample.
+        :param x: example:one sample with two features (discrete and continuous): np.array([1,1.5])
+        """
         child: Node = None
 
         # TODO: choose the child node the sample 'x' would flow to
-
-        return child
+        value = x[self.feature_idx] # the value of the feature this node focuses on
+        if self.feature_type == FeatureType.DISCRETE: # discrete column
+            for i, split_value in enumerate(self.feature_split_values): # children follow the split value order
+                if value == split_value:
+                    return self.children[i]
+        elif self.feature_type == FeatureType.CONTINUOUS: # continuous column
+            threshold = self.feature_split_values[0]# there is only one threshold
+            if value <= threshold:
+                return self.children[0]
+            else:
+                return self.children[1]
+        return LeafNode(self.header, self.quality_function, self.X, self.y_gt) # unseen discrete values majority class
 
     def get_child_datasets(self: InteriorNode) -> Sequence[tuple[np.ndarray, np.ndarray]]:
         child_datasets: Sequence[tuple[np.ndarray, np.ndarray]] = list()

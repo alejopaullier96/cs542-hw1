@@ -7,6 +7,7 @@ import numpy as np
 
 
 # PYTHON PROJECT IMPORTS
+from .quality.gr import GainRatio
 from .data.header import Feature, FeatureType, ContinuousFeature, DiscreteFeature, Header
 from .quality.quality_function import QualityFunction
 from .model import Model
@@ -179,6 +180,12 @@ class InteriorNode(Node):
         feature_quality = float(self.quality_function.quality(y_gt, child_gts))
         return feature_quality, feature_split_values
 
+    def _entropy_from_counts(self: InteriorNode, counts: np.ndarray) -> float:
+
+        counts = counts[counts > 0]
+        probs = counts / counts.sum()
+        return float(-(probs * np.log2(probs)).sum()) # the closer to 0 the better or more pure
+
     def _eval_continuous_feature(
         self: InteriorNode,
         X: np.ndarray,
@@ -190,15 +197,40 @@ class InteriorNode(Node):
         :param y_gt: one target example: np.array([0, 0, 1, 1, 0])
         """
         X_col = X[:, feature_idx] # take the feature column
+        order = np.argsort(X_col) # sort order
+        sorted_x = X_col[order] # sort the feature
+        sorted_y = y_gt[order].astype(int, copy=False)# sorted y
+        n = sorted_y.shape[0] # number of examples, eg 5
+        n_classes = int(sorted_y.max()) + 1 # number of classes, eg 2
+        total_counts = np.bincount(sorted_y, minlength=n_classes) # count the number of examples for each class, eg [3 2]
+        parent_entropy = self._entropy_from_counts(total_counts) # entropy root, eg 0.971
+        if isinstance(self.quality_function, GainRatio):
+            scale = 0.5 # 2 children left/right for continuous, so gain / 2
+        else:
+            scale = 1.0
+        left_counts = np.zeros(n_classes, dtype=int) # [0 0]
         best_quality = -np.inf # initialize with the worst possible case
         best_threshold = None # no initial threshold
-        for threshold in self._get_continuous_feature_thresholds(X_col, y_gt): 
-            left_gts = y_gt[X_col <= threshold] # ground truth values for the left side
-            right_gts = y_gt[X_col > threshold] # ground truth values for the right side
-            quality = float(self.quality_function.quality(y_gt, [left_gts, right_gts])) # quality of the split
+        i = 0
+        while i < n - 1: # iterate over the examples
+            value = sorted_x[i]
+            while i < n and sorted_x[i] == value: # move every sample with this value to the 'left' side
+                left_counts[sorted_y[i]] += 1
+                i += 1
+            if i == n:# reached the end examples
+                break
+            if sorted_y[i - 1] == sorted_y[i]: # the label doesn't change
+                continue
+            n_left = i # number of examples on the left side
+            right_counts = total_counts - left_counts
+            left_entropy = (n_left / n) * self._entropy_from_counts(left_counts) # entropy of left side
+            right_entropy = ((n - n_left) / n) * self._entropy_from_counts(right_counts) # entropy of right side
+            gain = parent_entropy - left_entropy - right_entropy
+            quality = scale * gain
             if quality > best_quality:
-                best_quality = quality # save the best quality
-                best_threshold = threshold# save the best threshold
+                best_quality = quality
+                best_threshold = float((value + sorted_x[i]) / 2.0)
+
         return best_quality, [best_threshold]
     
     def _get_continuous_feature_thresholds(

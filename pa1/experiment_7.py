@@ -237,5 +237,5 @@ def experiment_d():
 ### /opt/anaconda3/bin/python -m experiment_7
 # experiment_a()
 # experiment_b()
-experiment_c()
-# experiment_d()
+# experiment_c()
+experiment_d()

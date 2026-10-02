@@ -111,7 +111,7 @@ def experiment_c():
     loaders = {
         # "voting": load_voting,
         "volcanoes": load_volcanoes,
-        "spam": load_spam,
+        # "spam": load_spam,
     }
     quality_funcs = {
         "information gain": InformationGain(),

@@ -204,10 +204,6 @@ class InteriorNode(Node):
         n_classes = int(sorted_y.max()) + 1 # number of classes, eg 2
         total_counts = np.bincount(sorted_y, minlength=n_classes) # count the number of examples for each class, eg [3 2]
         parent_entropy = self._entropy_from_counts(total_counts) # entropy root, eg 0.971
-        if isinstance(self.quality_function, GainRatio):
-            scale = 0.5 # 2 children left/right for continuous, so gain / 2
-        else:
-            scale = 1.0
         left_counts = np.zeros(n_classes, dtype=int) # [0 0]
         best_quality = -np.inf # initialize with the worst possible case
         best_threshold = None # no initial threshold
@@ -226,7 +222,11 @@ class InteriorNode(Node):
             left_entropy = (n_left / n) * self._entropy_from_counts(left_counts) # entropy of left side
             right_entropy = ((n - n_left) / n) * self._entropy_from_counts(right_counts) # entropy of right side
             gain = parent_entropy - left_entropy - right_entropy
-            quality = scale * gain
+            if isinstance(self.quality_function, GainRatio):
+                split_info = self._entropy_from_counts(np.array([n_left, n - n_left])) # entropy of the branch proportions
+                quality = gain / split_info
+            else:
+                quality = gain
             if quality > best_quality:
                 best_quality = quality
                 best_threshold = float((value + sorted_x[i]) / 2.0)
@@ -566,12 +566,33 @@ class RandomForestClassifier(Model):
         """
 
         # TODO: build the forest! 
-        ...
+        self.trees = list()
+        num_samples = X.shape[0] # number of rows
+        # num_samples = min(X.shape[0], 3000)
+        for i in range(self.num_trees):
+            X_bootstrap, y_bootstrap = self._bootstrap_sample(X, y_gt, num_samples) # bootstrap sample with replacement
+            feature_idxs = self._sample_features(self.max_num_features) # sample features, eg {0, 1, 2}
+            tree = DecisionTreeClassifier(self.header, self.quality_function, available_feature_idxs=feature_idxs) # build the tree
+            tree.fit(X_bootstrap, y_bootstrap, pre_prune_function=pre_prune_function, mcc_prune=mcc_prune, alpha=alpha) # train the tree
+            self.trees.append(tree) # add the tree to the forest
+
 
     def predict(self: RandomForestClassifier,
                 X: np.ndarray) -> np.ndarray:
         # TODO: ask each tree to predict 'X' and then implement majority voting!
-        ...
+        num_samples = X.shape[0] # number of rows
+        preds = []
+        for tree in self.trees: # predict X with each tree
+            preds.append(tree.predict(X)) # shape (num_samples,)
+        all_preds = np.stack(preds, axis=1) # stack the predictions into a 2D array, shape (num_samples, num_trees)
+        y_hat = np.zeros(num_samples) # placeholder to store preds
+        for idx in range(num_samples):
+            # for each row count the votes for each class
+            values, counts = np.unique(all_preds[idx, :], return_counts=True)
+            y_hat[idx] = values[np.argmax(counts)] # pred is the class with most votes
+
+        return y_hat
+        
 
     # helpful for printing the forest
     def __str__(self: RandomForestClassifier) -> str:

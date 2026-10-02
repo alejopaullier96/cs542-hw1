@@ -398,6 +398,48 @@ class DecisionTreeClassifier(Model):
 
         return root
 
+    def _leaf_errors(self: DecisionTreeClassifier, node: Node) -> int:
+        samples = node.num_samples # number of samples at this node
+        samples_majority = np.max(node.unique_class_counts) # most common class
+        errors = int(samples - samples_majority) # number of samples that are not the majority class
+        return errors
+
+    def _subtree_stats(
+            self: DecisionTreeClassifier,
+            node: Node,
+            pruned: Set[Node],
+            stats: dict
+        ) -> tuple[int, int]:
+        """
+        Count the training errors and number of leaves of the subtree rooted at 'node'
+        Nodes inside 'pruned' are treated as if they were leaves
+        Every interior node visited is saved in 'stats' as dict with 'node': (errors, num_leaves)
+        """
+        if node.is_leaf() or node in pruned: # this node acts like a leaf
+            errors = self._leaf_errors(node) # number of errors at this node
+            num_leaves = 1 # number of leaves at this node
+            return errors, num_leaves
+        errors, num_leaves = 0, 0
+        for child in node.children: # iterate over the childern
+            child_errors, child_leaves = self._subtree_stats(child, pruned, stats) # get the errors and leaves of each child
+            errors += child_errors # add errors to the total errors
+            num_leaves += child_leaves # add leaves to the total leaves
+        stats[node] = (errors, num_leaves) # save the errors and leaves of this node
+        return errors, num_leaves
+
+    def _apply_pruning(
+            self: DecisionTreeClassifier,
+            node: Node,
+            pruned: Set[Node]
+        ) -> Node:
+        # replace every node in 'pruned' with a real LeafNode
+        if node.is_leaf(): # if the node is a leaf, return it
+            return node
+        if node in pruned: # if the node is in the pruned set, return a leaf node
+            return LeafNode(self.header, self.quality_function, node.X, node.y_gt)
+        node.children = [self._apply_pruning(child, pruned) for child in node.children] # recursively apply pruning to the children
+        return node
+        
     def fit(self: DecisionTreeClassifier,
             X: np.ndarray,
             y_gt: np.ndarray,
@@ -410,6 +452,35 @@ class DecisionTreeClassifier(Model):
         self.root = self._build(X, y_gt, self.available_feature_idxs, 1, pre_prune_function=pre_prune_function)
 
         # TODO: implement minimum-cost-complexity pruning algorithm!
+        if mcc_prune:
+            pruned = set() # interior nodes turned into leaves
+            sequence = [] # tuple with the cost and the pruned set
+            while True:
+                stats = dict()
+                errors, num_leaves = self._subtree_stats(self.root, pruned, stats) # get the errors of the root
+                cost = errors + alpha * num_leaves # e'(T)
+                sequence.append((cost, set(pruned)))
+                if len(stats) == 0: # no interior nodes left, T is a single leaf
+                    break
+
+                best_node, best_score = None, np.inf# inicializar con el peor caso
+                for node, (sub_errors, sub_leaves) in stats.items(): # iterar sobre los nodos internos
+                    # sub_errors is the number of mistakes made by the leaves under the node
+                    # errors is the number of mistakes by the entire tree
+                    # leaf errors is the number of mistakes if the node was made into a leaf
+                    new_errors = errors - sub_errors + self._leaf_errors(node)
+                    new_num_leaves = num_leaves - sub_leaves + 1
+                    new_cost = new_errors + alpha * new_num_leaves # e'(prune(T, node))
+                    if sub_leaves == 1: # node has a single leaf below it, pruning changes nothing
+                        score = -np.inf
+                    else:
+                        score = (new_cost - cost) / (num_leaves - new_num_leaves)
+                    if score < best_score:
+                        best_node, best_score = node, score
+                pruned.add(best_node)# add the best node to the pruned set
+
+            best_cost, best_pruned = min(sequence, key=lambda entry: entry[0]) # get the best cost and the best pruned set
+            self.root = self._apply_pruning(self.root, best_pruned) # apply pruning to the root
 
     def _predict_sample(self: DecisionTreeClassifier,
                         x: np.ndarray) -> int:

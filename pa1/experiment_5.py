@@ -237,7 +237,7 @@ def experiment_d():
 
 
 ### cd pa1 /opt/anaconda3/bin/python -m src.experiment_5
-# experiment_a()
+experiment_a()
 # experiment_b()
 # experiment_c()
-experiment_d()
+# experiment_d()

@@ -142,6 +142,8 @@ class InteriorNode(Node):
         self.feature_quality = best_feature_quality
         self.feature_idx = best_feature_idx
         self.feature_split_values = best_feature_split_values
+        if best_feature_idx < 0:
+            return
         self.feature_type = self.header[self.feature_idx].type
 
     def _eval_feature(self: InteriorNode,
@@ -214,26 +216,36 @@ class InteriorNode(Node):
         i = 0
         while i < n - 1: # iterate over the examples
             value = sorted_x[i]
+            group_counts = np.zeros(n_classes, dtype=int)
             while i < n and sorted_x[i] == value: # move every sample with this value to the 'left' side
+                group_counts[sorted_y[i]] += 1
                 left_counts[sorted_y[i]] += 1
                 i += 1
             if i == n:# reached the end examples
                 break
-            if sorted_y[i - 1] == sorted_y[i]: # the label doesn't change
+            
+            next_counts = np.zeros(n_classes, dtype=int) # a cut is useful unless both adjacent value-groups are pure and share one class
+            j = i
+            next_value = sorted_x[i]
+            while j < n and sorted_x[j] == next_value:
+                next_counts[sorted_y[j]] += 1
+                j += 1
+            group_classes = np.flatnonzero(group_counts)
+            next_classes = np.flatnonzero(next_counts)
+            both_pure_same = (group_classes.size == 1 and next_classes.size == 1 and group_classes[0] == next_classes[0])
+            if both_pure_same:
                 continue
             n_left = i # number of examples on the left side
-            right_counts = total_counts - left_counts
-            left_entropy = (n_left / n) * self._entropy_from_counts(left_counts) # entropy of left side
-            right_entropy = ((n - n_left) / n) * self._entropy_from_counts(right_counts) # entropy of right side
-            gain = parent_entropy - left_entropy - right_entropy
-            if isinstance(self.quality_function, GainRatio):
-                quality = gain / 2.0
-            else:
-                quality = gain
+            left_y = sorted_y[:n_left]
+            right_y = sorted_y[n_left:]
+
+            quality = float(self.quality_function.quality(y_gt, [left_y, right_y]))
             if quality > best_quality:
                 best_quality = quality
-                best_threshold = float((value + sorted_x[i]) / 2.0)
+                best_threshold = float((value + next_value) / 2.0)
 
+        if best_threshold is None:
+            return -np.inf, []
         return best_quality, [best_threshold]
     
     def _get_continuous_feature_thresholds(
@@ -396,9 +408,15 @@ class DecisionTreeClassifier(Model):
                 node: Node = LeafNode(self.header, self.quality_function, X_node, y_node) 
             else:
                 node = InteriorNode(self.header, self.quality_function, X_node, y_node, feature_idxs)
-                for X_child, y_child in node.get_child_datasets(X_node, y_node):# add child nodes to the queue
-                    new_depth = depth_node + 1 
-                    pending.append((X_child, y_child, set(node.child_feature_idxs), new_depth, node))
+                if node.feature_idx is None or node.feature_idx < 0 or not node.feature_split_values:
+                    node = LeafNode(self.header, self.quality_function, X_node, y_node)
+                else:
+                    for X_child, y_child in node.get_child_datasets(X_node, y_node):# add child nodes to the queue
+                        # Drop empty branches so a missing discrete value does not create a node
+                        if X_child.shape[0] == 0:
+                            continue
+                        new_depth = depth_node + 1 
+                        pending.append((X_child, y_child, set(node.child_feature_idxs), new_depth, node))
 
             self.num_nodes += 1 
             if parent is None:
@@ -489,8 +507,18 @@ class DecisionTreeClassifier(Model):
                         best_node, best_score = node, score
                 pruned.add(best_node)# add the best node to the pruned set
 
-            best_cost, best_pruned = min(sequence, key=lambda entry: entry[0]) # get the best cost and the best pruned set
+            best_cost, best_pruned = np.inf, None
+            for cost, pruned_nodes in sequence:
+                if cost <= best_cost:
+                    best_cost, best_pruned = cost, pruned_nodes
             self.root = self._apply_pruning(self.root, best_pruned) # apply pruning to the root
+            self.num_nodes = self._count_nodes(self.root) # pruning replaces subtrees with leaves, so recount
+
+    def _count_nodes(self: DecisionTreeClassifier,
+                     node: Node) -> int:
+        if node.is_leaf():
+            return 1
+        return 1 + sum(self._count_nodes(child) for child in node.children)
 
     def _predict_sample(self: DecisionTreeClassifier,
                         x: np.ndarray) -> int:

@@ -235,7 +235,7 @@ def experiment_d():
 
 ### cd pa1 
 ### /opt/anaconda3/bin/python -m experiment_7
-# experiment_a()
+experiment_a()
 # experiment_b()
 # experiment_c()
-experiment_d()
+# experiment_d()
